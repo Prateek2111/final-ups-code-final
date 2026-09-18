@@ -186,7 +186,7 @@ export default function OverviewTab({
                 ⚡ ACS712 DC Current
               </span>
               <span className="px-2 py-0.5 rounded text-[10px] font-extrabold bg-amber-500/15 text-amber-500">
-                GPIO 36
+                GPIO 12
               </span>
             </div>
             <span className="text-xl font-extrabold text-[var(--text-main)]">

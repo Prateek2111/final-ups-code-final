@@ -19,7 +19,7 @@ const char* serverName = "https://final-ups-code-final.onrender.com/send-data";
 #define ZMPT101B_PIN 35      // AC Voltage Sensor Pin (ZMPT101B Output - ADC1_CH7)
 #define JCT5052C_PIN1 32     // JCT5052C AC Current Sensor 1 Pin (ADC1_CH4)
 #define JCT5052C_PIN2 33     // JCT5052C AC Current Sensor 2 Pin (ADC1_CH5)
-#define ACS712_PIN 36        // ACS712 DC Current Sensor Pin (ADC1_CH0 / VP - Must be ADC1, ADC2 fails with WiFi)
+#define ACS712_PIN 12        // ACS712 DC Current Sensor Pin (GPIO 12)
 
 // Relay Output Pins
 #define RELAY_SOURCE      18   // Relay 1 - Mains Grid Cutoff (GPIO 18)
