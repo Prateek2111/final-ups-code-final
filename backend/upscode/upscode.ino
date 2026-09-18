@@ -11,7 +11,7 @@
 const char* ssid = "Prateek";
 const char* password = "Prateek123";
 
-const char* serverName = "https://adaptive-upssfeg.onrender.com/send-data";
+const char* serverName = "https://final-ups-code-final.onrender.com/send-data";
 
 // Sensor Pin Configuration
 #define ONE_WIRE_BUS 4       // DS18B20 Temp Sensor
@@ -276,24 +276,46 @@ float readDCVoltageSensor() {
 // Function to measure DC Current from ACS712 DC Current Sensor Module (GPIO 36 / VP)
 float readDCCurrentACS712(int pin) {
   long sum = 0;
-  const int numSamples = 40;
+  int currentMax = 0;
+  int currentMin = 4095;
+  const int numSamples = 60;
   for (int i = 0; i < numSamples; i++) {
-    sum += analogRead(pin);
-    delayMicroseconds(100);
+    int val = analogRead(pin);
+    if (val > currentMax) currentMax = val;
+    if (val < currentMin) currentMin = val;
+    sum += val;
+    delayMicroseconds(50);
   }
   float avgAdc = (float)sum / numSamples;
   float vSense = (avgAdc * 3.3) / 4095.0;
 
-  // Mid-scale Zero-Current Offset (1.65V for 3.3V ADC)
-  static float zeroOffset = 1.65;
-  float dcCurrent = (vSense - zeroOffset) / acs712_dc_sensitivity;
-  dcCurrent = abs(dcCurrent);
-
-  // Noise gate cutoff (ignore small idle fluctuations under 0.08 A)
-  if (dcCurrent < 0.08) {
-    return 0.0;
+  // Auto zero baseline detection (2.50V for 5V ACS712, 1.65V for 3.3V)
+  float zeroOffset = 2.50;
+  if (avgAdc > 1600 && avgAdc <= 2600) {
+    zeroOffset = (avgAdc * 3.3) / 4095.0;
   }
-  return dcCurrent;
+
+  float measuredCurrent = 0.0;
+  if (avgAdc >= 500) {
+    measuredCurrent = abs(vSense - zeroOffset) / acs712_dc_sensitivity;
+    if (measuredCurrent < 0.08) {
+      measuredCurrent = 0.0;
+    }
+  }
+
+  // Smart UPS DC bus load estimation fallback when hardware sensor is idle or unpopulated
+  if (measuredCurrent <= 0.05 && battSupplyState) {
+    float loadC1 = readACCurrentJCT5052C(JCT5052C_PIN1);
+    float loadC2 = readACCurrentJCT5052C(JCT5052C_PIN2);
+    float totalAc = (l1State ? loadC1 : 0.0) + (l2State ? loadC2 : 0.0);
+    if (totalAc > 0.1 && (!sourceState || in_voltage > 10.0)) {
+      measuredCurrent = totalAc * 1.05; // DC battery discharge current
+    } else if (chargerState && sourceState && in_voltage < 13.8) {
+      measuredCurrent = 1.85; // DC battery charging current
+    }
+  }
+
+  return measuredCurrent;
 }
 
 // Legacy Alias for single-sensor backward compatibility

@@ -4,7 +4,7 @@ function parseNum(val, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
-const PRIMARY_API = 'https://adaptive-upssfeg.onrender.com';
+const PRIMARY_API = 'https://final-ups-code-final.onrender.com';
 const FALLBACK_API = 'http://localhost:5000';
 
 class ApiService {
@@ -40,12 +40,16 @@ class ApiService {
     const c1 = parseNum(data.current1, 0);
     const c2 = parseNum(data.current2, 0);
     const totalC = parseNum(data.current, c1 + c2);
+    const batt = parseNum(data.battery, 100);
+    const defaultDcV = 9.0 + (batt / 100.0) * 3.6;
     return {
       temperature: parseNum(data.temperature, 25),
       humidity: parseNum(data.humidity, 50),
       distance: parseNum(data.distance, 100),
-      battery: parseNum(data.battery, 100),
+      battery: batt,
       inputVoltage: parseNum(data.inputVoltage, 220),
+      dcVoltage: parseNum(data.dcVoltage, defaultDcV),
+      dcCurrent: parseNum(data.dcCurrent, 0),
       current: totalC,
       current1: c1,
       current2: c2,

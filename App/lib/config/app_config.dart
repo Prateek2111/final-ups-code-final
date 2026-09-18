@@ -9,7 +9,7 @@ class AppConfig {
       return _apiBaseFromEnv;
     }
 
-    return 'https://adaptive-upssfeg.onrender.com';
+    return 'https://final-ups-code-final.onrender.com/health';
   }
 
   static const String fallbackApiBase = 'http://10.0.2.2:5000';

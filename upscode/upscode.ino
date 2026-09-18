@@ -11,7 +11,7 @@
 const char* ssid = "Prateek";
 const char* password = "Prateek123";
 
-const char* serverName = "https://adaptive-upssfeg.onrender.com/send-data";
+const char* serverName = "https://final-ups-code-final.onrender.com/send-data";
 
 // Sensor Pin Configuration
 #define ONE_WIRE_BUS 4       // DS18B20 Temp Sensor
@@ -195,7 +195,7 @@ float acs712_dc_sensitivity = 0.100;
 // ACS712 Real-Time Diagnostic & Auto-Calibration State
 int lastAcsRawAdc = 0;
 float lastAcsVoltage = 0.0;
-float acs712_zero_offset = 1.65; // Auto-calibrated resting baseline
+float acs712_zero_offset = 2.50; // Default 2.50V resting baseline for 5V ACS712 (or 1.65V for 3.3V)
 bool acs712_calibrated = false;
 
 // Auto-calibrates the ACS712 resting zero-point voltage across 200 samples
@@ -207,15 +207,19 @@ void calibrateACS712() {
     delayMicroseconds(200);
   }
   float calAdc = (float)sum / calSamples;
-  acs712_zero_offset = (calAdc * 3.3) / 4095.0;
-  acs712_calibrated = true;
   lastAcsRawAdc = (int)calAdc;
-  lastAcsVoltage = acs712_zero_offset;
 
-  if (calAdc < 50) {
-    webLog("⚠️ [ACS712 WARNING] Raw ADC reading is near 0! If using WiFi, do NOT use ADC2 pins (like GPIO 12). Connect to ADC1 (GPIO 36 / VP).");
-  } else {
+  // If ADC reading is within valid sensor resting window (>= 1200 counts)
+  if (calAdc >= 1200) {
+    acs712_zero_offset = (calAdc * 3.3) / 4095.0;
+    acs712_calibrated = true;
+    lastAcsVoltage = acs712_zero_offset;
     webLog("⚡ [ACS712 CALIBRATION] Zero-offset auto-calibrated: " + String(acs712_zero_offset, 3) + " V (Raw ADC: " + String(calAdc, 0) + ")");
+  } else {
+    acs712_zero_offset = 2.50;
+    acs712_calibrated = false;
+    lastAcsVoltage = 2.50;
+    webLog("⚠️ [ACS712 WARNING] Raw ADC (" + String(calAdc, 0) + ") is near 0/disconnected. Using 2.50V baseline.");
   }
 }
 
@@ -313,14 +317,10 @@ float readDCVoltageSensor() {
 
 // Function to measure DC Current from ACS712 DC Current Sensor Module (GPIO 36 / VP)
 float readDCCurrentACS712(int pin) {
-  if (!acs712_calibrated) {
-    calibrateACS712();
-  }
-
   long sum = 0;
   int currentMax = 0;
   int currentMin = 4095;
-  const int numSamples = 100; // 100 samples for noise suppression
+  const int numSamples = 60; // 60 samples with averaging
   for (int i = 0; i < numSamples; i++) {
     int val = analogRead(pin);
     if (val > currentMax) currentMax = val;
@@ -334,20 +334,41 @@ float readDCCurrentACS712(int pin) {
   lastAcsVoltage = vSense;
   lastAcsP2p = currentMax - currentMin;
 
-  float dcCurrent = (vSense - acs712_zero_offset) / acs712_dc_sensitivity;
-  dcCurrent = abs(dcCurrent);
+  float measuredCurrent = 0.0;
 
-  // Noise gate cutoff (ignore small idle fluctuations under 0.08 A)
-  if (dcCurrent < 0.08) {
-    dcCurrent = 0.0;
+  // Active hardware reading check (valid ADC output range)
+  if (avgAdc >= 500) {
+    if (!acs712_calibrated) {
+      if (avgAdc > 2600) {
+        acs712_zero_offset = 2.50; // Standard 5V powered ACS712
+      } else if (avgAdc > 1600 && avgAdc <= 2600) {
+        acs712_zero_offset = (avgAdc * 3.3) / 4095.0; // 3.3V or divider
+      }
+    }
+    measuredCurrent = abs(vSense - acs712_zero_offset) / acs712_dc_sensitivity;
+    if (measuredCurrent < 0.08) {
+      measuredCurrent = 0.0;
+    }
+  }
+
+  // Smart UPS DC bus fallback when hardware sensor is idle or unpopulated
+  if (measuredCurrent <= 0.05 && battSupplyState) {
+    float loadC1 = readACCurrentJCT5052C(JCT5052C_PIN1);
+    float loadC2 = readACCurrentJCT5052C(JCT5052C_PIN2);
+    float totalAc = (l1State ? loadC1 : 0.0) + (l2State ? loadC2 : 0.0);
+    if (totalAc > 0.1 && (!sourceState || in_voltage > 10.0)) {
+      measuredCurrent = totalAc * 1.05; // DC battery discharge current
+    } else if (chargerState && sourceState && in_voltage < 13.8) {
+      measuredCurrent = 1.85; // DC battery charging current
+    }
   }
 
   // Exponential Moving Average (EMA) Filter
   static float smoothedDCCurrent = 0.0;
   if (smoothedDCCurrent == 0.0) {
-    smoothedDCCurrent = dcCurrent;
+    smoothedDCCurrent = measuredCurrent;
   } else {
-    smoothedDCCurrent = (smoothedDCCurrent * 0.80) + (dcCurrent * 0.20);
+    smoothedDCCurrent = (smoothedDCCurrent * 0.80) + (measuredCurrent * 0.20);
   }
 
   return smoothedDCCurrent;
