@@ -12,6 +12,10 @@ process.on("SIGINT", async () => {
   process.exit(0);
 });
 
+app.use('/health', (req, res) => {
+  res.status(200).send('OK');
+});
+
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Backend running on http://localhost:${PORT}`);
