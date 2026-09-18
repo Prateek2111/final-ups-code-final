@@ -273,12 +273,12 @@ float readDCVoltageSensor() {
   return measuredDC;
 }
 
-// Function to measure DC Current from ACS712 DC Current Sensor Module (GPIO 36 / VP)
+// Function to measure Real-Time Dynamic DC Current directly from ACS712 Sensor (GPIO 36 / VP)
 float readDCCurrentACS712(int pin) {
   long sum = 0;
   int currentMax = 0;
   int currentMin = 4095;
-  const int numSamples = 60;
+  const int numSamples = 100;
   for (int i = 0; i < numSamples; i++) {
     int val = analogRead(pin);
     if (val > currentMax) currentMax = val;
@@ -291,31 +291,24 @@ float readDCCurrentACS712(int pin) {
 
   // Auto zero baseline detection (2.50V for 5V ACS712, 1.65V for 3.3V)
   float zeroOffset = 2.50;
-  if (avgAdc > 1600 && avgAdc <= 2600) {
-    zeroOffset = (avgAdc * 3.3) / 4095.0;
+  if (avgAdc >= 1400 && avgAdc < 2600) {
+    zeroOffset = 1.65;
   }
 
-  float measuredCurrent = 0.0;
-  if (avgAdc >= 500) {
-    measuredCurrent = abs(vSense - zeroOffset) / acs712_dc_sensitivity;
-    if (measuredCurrent < 0.08) {
-      measuredCurrent = 0.0;
-    }
+  float dynamicCurrent = abs(vSense - zeroOffset) / acs712_dc_sensitivity;
+  if (dynamicCurrent < 0.05) {
+    dynamicCurrent = 0.0;
   }
 
-  // Smart UPS DC bus load estimation fallback when hardware sensor is idle or unpopulated
-  if (measuredCurrent <= 0.05 && battSupplyState) {
-    float loadC1 = readACCurrentJCT5052C(JCT5052C_PIN1);
-    float loadC2 = readACCurrentJCT5052C(JCT5052C_PIN2);
-    float totalAc = (l1State ? loadC1 : 0.0) + (l2State ? loadC2 : 0.0);
-    if (totalAc > 0.1 && (!sourceState || in_voltage > 10.0)) {
-      measuredCurrent = totalAc * 1.05; // DC battery discharge current
-    } else if (chargerState && sourceState && in_voltage < 13.8) {
-      measuredCurrent = 1.85; // DC battery charging current
-    }
+  // Smooth real-time fluctuations
+  static float smoothedDCCurrent = 0.0;
+  if (smoothedDCCurrent == 0.0) {
+    smoothedDCCurrent = dynamicCurrent;
+  } else {
+    smoothedDCCurrent = (smoothedDCCurrent * 0.75) + (dynamicCurrent * 0.25);
   }
 
-  return measuredCurrent;
+  return smoothedDCCurrent;
 }
 
 // Legacy Alias for single-sensor backward compatibility

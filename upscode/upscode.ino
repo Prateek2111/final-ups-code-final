@@ -315,12 +315,12 @@ float readDCVoltageSensor() {
   return smoothedDC;
 }
 
-// Function to measure DC Current from ACS712 DC Current Sensor Module (GPIO 36 / VP)
+// Function to measure Real-Time Dynamic DC Current directly from ACS712 Sensor (GPIO 36 / VP)
 float readDCCurrentACS712(int pin) {
   long sum = 0;
   int currentMax = 0;
   int currentMin = 4095;
-  const int numSamples = 60; // 60 samples with averaging
+  const int numSamples = 100; // 100 samples for clean, accurate ADC averaging
   for (int i = 0; i < numSamples; i++) {
     int val = analogRead(pin);
     if (val > currentMax) currentMax = val;
@@ -334,41 +334,31 @@ float readDCCurrentACS712(int pin) {
   lastAcsVoltage = vSense;
   lastAcsP2p = currentMax - currentMin;
 
-  float measuredCurrent = 0.0;
-
-  // Active hardware reading check (valid ADC output range)
-  if (avgAdc >= 500) {
-    if (!acs712_calibrated) {
-      if (avgAdc > 2600) {
-        acs712_zero_offset = 2.50; // Standard 5V powered ACS712
-      } else if (avgAdc > 1600 && avgAdc <= 2600) {
-        acs712_zero_offset = (avgAdc * 3.3) / 4095.0; // 3.3V or divider
-      }
-    }
-    measuredCurrent = abs(vSense - acs712_zero_offset) / acs712_dc_sensitivity;
-    if (measuredCurrent < 0.08) {
-      measuredCurrent = 0.0;
+  // Quiescent zero offset detection if not calibrated
+  if (!acs712_calibrated) {
+    if (avgAdc >= 2600) {
+      acs712_zero_offset = 2.50; // Standard 5V VCC ACS712 (quiescent ~2.5V)
+    } else if (avgAdc >= 1400 && avgAdc < 2600) {
+      acs712_zero_offset = 1.65; // Standard 3.3V VCC ACS712 (quiescent ~1.65V)
+    } else {
+      acs712_zero_offset = 2.50;
     }
   }
 
-  // Smart UPS DC bus fallback when hardware sensor is idle or unpopulated
-  if (measuredCurrent <= 0.05 && battSupplyState) {
-    float loadC1 = readACCurrentJCT5052C(JCT5052C_PIN1);
-    float loadC2 = readACCurrentJCT5052C(JCT5052C_PIN2);
-    float totalAc = (l1State ? loadC1 : 0.0) + (l2State ? loadC2 : 0.0);
-    if (totalAc > 0.1 && (!sourceState || in_voltage > 10.0)) {
-      measuredCurrent = totalAc * 1.05; // DC battery discharge current
-    } else if (chargerState && sourceState && in_voltage < 13.8) {
-      measuredCurrent = 1.85; // DC battery charging current
-    }
+  // Calculate real-time dynamic current directly from physical sensor voltage
+  float dynamicCurrent = abs(vSense - acs712_zero_offset) / acs712_dc_sensitivity;
+
+  // Cutoff idle noise floor below 0.05 A
+  if (dynamicCurrent < 0.05) {
+    dynamicCurrent = 0.0;
   }
 
-  // Exponential Moving Average (EMA) Filter
+  // Smooth real-time fluctuations with responsive Exponential Moving Average
   static float smoothedDCCurrent = 0.0;
   if (smoothedDCCurrent == 0.0) {
-    smoothedDCCurrent = measuredCurrent;
+    smoothedDCCurrent = dynamicCurrent;
   } else {
-    smoothedDCCurrent = (smoothedDCCurrent * 0.80) + (measuredCurrent * 0.20);
+    smoothedDCCurrent = (smoothedDCCurrent * 0.75) + (dynamicCurrent * 0.25);
   }
 
   return smoothedDCCurrent;

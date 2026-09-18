@@ -144,23 +144,11 @@ export default function App() {
           : sensor.battery !== undefined
           ? 9.0 + (sensor.battery / 100.0) * 3.6
           : 12.6;
-      const rawDcCurrent =
-        sensor.dcCurrent !== undefined && Number(sensor.dcCurrent) > 0
+      const dynamicDcCurrent =
+        sensor.dcCurrent !== undefined && sensor.dcCurrent !== null
           ? Number(sensor.dcCurrent)
           : 0.0;
-      let calculatedDcCurrent = rawDcCurrent;
-      if (calculatedDcCurrent === 0.0) {
-        const totalLoads =
-          (sensor.current || 0) > 0
-            ? Number(sensor.current)
-            : (Number(sensor.current1) || 0) + (Number(sensor.current2) || 0);
-        if (battSupplyOn && !supplyOn && totalLoads > 0) {
-          calculatedDcCurrent = totalLoads * 1.02;
-        } else if (chargerOn && supplyOn && calculatedDcV < 13.8) {
-          calculatedDcCurrent = 1.85;
-        }
-      }
-      setSystemDcCurrent(calculatedDcCurrent);
+      setSystemDcCurrent(dynamicDcCurrent);
       setSystemCurrent(sensor.current);
       setSystemCurrent1(sensor.current1 || 0);
       setSystemCurrent2(sensor.current2 || 0);
