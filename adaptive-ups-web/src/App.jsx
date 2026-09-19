@@ -296,7 +296,7 @@ export default function App() {
         : isL2
         ? 'Load 2 Circuit Relay (GPIO 15)'
         : isBattSupply
-        ? 'Battery-to-Inverter DC Relay (GPIO 19)'
+        ? 'Relay - 4 Inverter Relay'
         : 'Battery Charger Relay (GPIO 21)';
       const statusStr = state ? 'ACTIVE (ON)' : 'ISOLATED (OFF)';
       addLog(`${label} switched to ${statusStr}`, 'ok');

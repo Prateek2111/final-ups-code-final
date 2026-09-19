@@ -176,7 +176,7 @@ const char* otaWebPage =
 int lastZmptP2p = 0;
 int lastAcsP2p = 0;
 unsigned long lastPostTime = 0;
-const unsigned long postInterval = 500; // High-speed instant cloud sync (500ms)
+const unsigned long postInterval = 250; // Ultra-fast cloud sync (250ms) for instant relay response
 
 // Set to true when JCT5052C current sensors are physically connected to GPIO 32 and GPIO 33.
 #define CURRENT_SENSOR_ENABLED true
@@ -194,7 +194,7 @@ float acs712_dc_sensitivity = 0.100;
 float readACCurrentJCT5052C(int pin) {
   if (!CURRENT_SENSOR_ENABLED) return 0.0;
 
-  const int samplePeriodMs = 60; // 60ms = ~3 complete 50Hz AC cycles
+  const int samplePeriodMs = 20; // 20ms = 1 complete 50Hz AC cycle
   unsigned long startTime = millis();
   long sumADC = 0;
   long sampleCount = 0;
@@ -325,8 +325,9 @@ float zmpt_calibration = 366.0;
 
 // Function to measure True RMS AC Voltage using EmonLib Digital High-Pass Filter Algorithm (GPIO 35)
 float readACVoltageZMPT101B() {
-  const int numberOfSamples = 1500;
+  const int numberOfSamples = 250; // 250 samples * 80µs = ~20ms (1 full 50Hz AC cycle)
   static double offsetV = 2048.0; // Dynamic DC offset tracking initialized to mid-scale
+  static float smoothedVoltage = 0.0;
   double sumV = 0.0;
   int currentMax = 0;
   int currentMin = 4095;
@@ -338,8 +339,8 @@ float readACVoltageZMPT101B() {
     if (sampleV > currentMax) currentMax = sampleV;
     if (sampleV < currentMin) currentMin = sampleV;
 
-    // EmonLib Digital High-Pass Filter to remove DC offset:
-    offsetV = offsetV + ((sampleV - offsetV) / 1024.0);
+    // Fast DC offset convergence filter:
+    offsetV = offsetV + ((sampleV - offsetV) / 256.0);
     double filteredV = sampleV - offsetV;
 
     sumV += (filteredV * filteredV);
@@ -353,6 +354,7 @@ float readACVoltageZMPT101B() {
   // Floating Pin / Random Digital Noise Cutoff:
   // If Peak-to-Peak on analog AC pin is under 25 counts, AC is OFF (0.0 V AC)
   if (lastZmptP2p < 25) {
+    smoothedVoltage = 0.0;
     return 0.0;
   }
 
@@ -365,15 +367,15 @@ float readACVoltageZMPT101B() {
 
   // Noise gate: if Vrms is below 15.0V AC (idle noise), report 0.0 V AC
   if (trueRMSVoltage < 15.0) {
+    smoothedVoltage = 0.0;
     return 0.0;
   }
 
-  // Exponential Moving Average (EMA) smoothing to eliminate random fluctuations
-  static float smoothedVoltage = 0.0;
-  if (smoothedVoltage == 0.0) {
-    smoothedVoltage = trueRMSVoltage;
+  // Fast-response smoothing: instantaneous on voltage restoration (>30V jump)
+  if (abs(trueRMSVoltage - smoothedVoltage) > 30.0 || smoothedVoltage == 0.0) {
+    smoothedVoltage = trueRMSVoltage; // Fast instant step response
   } else {
-    smoothedVoltage = (smoothedVoltage * 0.7) + (trueRMSVoltage * 0.3);
+    smoothedVoltage = (smoothedVoltage * 0.6) + (trueRMSVoltage * 0.4);
   }
 
   return smoothedVoltage;
@@ -626,6 +628,8 @@ void setup() {
 
   webLog("WiFi Connected! IP: http://" + WiFi.localIP().toString());
   sensors.begin();
+  sensors.setWaitForConversion(false); // Non-blocking async temperature conversion (eliminates 750ms delay)
+  sensors.requestTemperatures();       // Request initial temperature reading
 
   // Initialize Web Server for Web OTA & Wireless Serial Logs
   server.on("/", HTTP_GET, []() {
@@ -894,6 +898,68 @@ void loop() {
   if (currentMillis - lastPostTime >= postInterval) {
     lastPostTime = currentMillis;
 
+    // Read AC Input Voltage from ZMPT101B (GPIO 35)
+    float acInputVoltage = readACVoltageZMPT101B();
+
+    // Automatic Mains Voltage Protection & Inverter Transfer:
+    // If AC Voltage is under 150V (brownout/blackout) or above 300V (overvoltage surge)
+    static int stableMainsCount = 0;
+    static bool autoSwitchedToInverter = false;
+
+    bool acVoltageUnsafe = (acInputVoltage < 150.0 || acInputVoltage > 300.0);
+    if (acVoltageUnsafe) {
+      stableMainsCount = 0;
+      if (sourceState != false || battSupplyState != false) {
+        webLog("⚠️ [AUTO VOLTAGE PROTECTION] AC Voltage: " + String(acInputVoltage, 1) + " V (Out of 150V-300V safe range)!");
+
+        // 1. Firstly, Master Relay goes into Inverter mode (Relay 1 / GPIO 18)
+        sourceState = false;
+        lastServerSource = false;
+        setRelayState(RELAY_SOURCE, false);
+        webLog("⚡ Step 1: Master Relay (GPIO 18) -> INVERTER MODE");
+
+        // 2. Wait a few milliseconds (dead-time transition)
+        delay(50); // 50ms transition delay
+
+        // 3. Turn ON Inverter Relay (Relay 4 / GPIO 19)
+        battSupplyState = false; // Active LOW -> Physical Relay ON & UI ON
+        lastServerBattSupply = false;
+        setRelayState(RELAY_BATT_SUPPLY, false);
+        webLog("🔋 Step 2: Relay 4 Inverter Relay (GPIO 19) -> ON");
+
+        autoSwitchedToInverter = true;
+      }
+    } else {
+      // AC Voltage has recovered between 150V and 300V:
+      if (autoSwitchedToInverter || sourceState == false) {
+        stableMainsCount++;
+        // Verify healthy voltage for ~500ms (2 cycles x 250ms) to ensure grid is stable
+        if (stableMainsCount >= 2) {
+          webLog("✅ [AUTO MAINS RESTORE] AC Voltage stable: " + String(acInputVoltage, 1) + " V (150V-300V safe range)!");
+
+          // 1. First, Inverter Relay (Relay 4 / GPIO 19) turns OFF
+          battSupplyState = true; // Active LOW -> true = Physical Relay OFF
+          lastServerBattSupply = true;
+          setRelayState(RELAY_BATT_SUPPLY, true);
+          webLog("🔌 Step 1: Relay 4 Inverter Relay (GPIO 19) -> TURNED OFF");
+
+          // 2. Wait a few milliseconds (dead-time transition to disconnect inverter output)
+          delay(50); // 50ms safe delay
+
+          // 3. Master Relay (Relay 1 / GPIO 18) switches to SET MAINS (Live grid supply)
+          sourceState = true;
+          lastServerSource = true;
+          setRelayState(RELAY_SOURCE, true);
+          webLog("⚡ Step 2: Master Relay (GPIO 18) -> SET MAINS (Live Grid Supply Active)");
+
+          autoSwitchedToInverter = false;
+          stableMainsCount = 0;
+        }
+      } else {
+        stableMainsCount = 0;
+      }
+    }
+
     if (WiFi.status() == WL_CONNECTED) {
       WiFiClientSecure client;
       client.setInsecure(); // skip certificate validation
@@ -901,7 +967,6 @@ void loop() {
       HTTPClient http;
       http.setTimeout(1500); // 1.5s fast timeout for instant sync
       http.begin(client, serverName);
-      sensors.requestTemperatures(); 
       http.addHeader("Content-Type", "application/json");
 
       // Read DC Battery Voltage from 0-25V DC Voltage Sensor (GPIO 34)
@@ -911,15 +976,14 @@ void loop() {
       // Read DC Current from ACS712 DC Current Sensor (GPIO 36)
       float dcCurrent = readDCCurrentACS712(ACS712_PIN);
 
-      // Read AC Input Voltage from ZMPT101B (GPIO 35)
-      float acInputVoltage = readACVoltageZMPT101B();
-
       // Read AC Current from Dual JCT5052C Sensors (GPIO 32 for Load 1, GPIO 33 for Load 2)
       float loadCurrent1 = readACCurrentJCT5052C(JCT5052C_PIN1);
       float loadCurrent2 = readACCurrentJCT5052C(JCT5052C_PIN2);
       float totalLoadCurrent = loadCurrent1 + loadCurrent2;
 
+      // Read Non-blocking DS18B20 Temperature & trigger next measurement in background (0ms blocking delay)
       float temperature = sensors.getTempCByIndex(0);
+      sensors.requestTemperatures(); // Trigger next conversion asynchronously without blocking
       if (temperature < -50.0 || temperature > 125.0) {
         temperature = 28.5; // Optimal fallback when DS18B20 physical sensor is unpopulated
       }
@@ -982,6 +1046,10 @@ void loop() {
             }
             if (toggle.containsKey("supply") || toggle.containsKey("source")) {
               bool sSupp = toggle.containsKey("supply") ? toggle["supply"].as<bool>() : toggle["source"].as<bool>();
+              if (sSupp && acVoltageUnsafe) {
+                webLog("🛡️ [PROTECTION BLOCKED] Cannot switch to MAINS: AC Voltage is " + String(acInputVoltage, 1) + " V (Unsafe)!");
+                sSupp = false;
+              }
               if (sourceState != sSupp) {
                 sourceState = sSupp;
                 lastServerSource = sSupp;
@@ -992,11 +1060,15 @@ void loop() {
             }
             if (toggle.containsKey("battSupply") || toggle.containsKey("batt") || toggle.containsKey("4")) {
               bool sBatt = toggle.containsKey("battSupply") ? toggle["battSupply"].as<bool>() : (toggle.containsKey("batt") ? toggle["batt"].as<bool>() : toggle["4"].as<bool>());
+              if (acVoltageUnsafe) {
+                // Ensure Inverter Relay stays ON during AC mains failure
+                sBatt = false;
+              }
               if (battSupplyState != sBatt) {
                 battSupplyState = sBatt;
                 lastServerBattSupply = sBatt;
                 setRelayState(RELAY_BATT_SUPPLY, battSupplyState);
-                String msg = "\n*******************************************************\n⚡ [APP COMMAND EXECUTED] Battery DC Supply Relay -> " + String(battSupplyState ? "CONNECTED / ON (GPIO 19)" : "DISCONNECTED / OFF (GPIO 19)") + "\n*******************************************************\n";
+                String msg = "\n*******************************************************\n⚡ [APP COMMAND EXECUTED] Battery DC Supply Relay -> " + String(!battSupplyState ? "CONNECTED / ON (GPIO 19)" : "DISCONNECTED / OFF (GPIO 19)") + "\n*******************************************************\n";
                 webLog(msg);
               }
             }

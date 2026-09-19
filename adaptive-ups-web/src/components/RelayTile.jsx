@@ -12,6 +12,7 @@ export default function RelayTile({
   isPending,
   onChanged,
   actions,
+  showToggle = true,
 }) {
   return (
     <div
@@ -41,7 +42,7 @@ export default function RelayTile({
         <div className="shrink-0 flex items-center">
           {isPending ? (
             <Loader2 className="w-6 h-6 text-blue-500 animate-spin" />
-          ) : (
+          ) : showToggle && onChanged ? (
             <label className="relative inline-flex items-center cursor-pointer select-none">
               <input
                 type="checkbox"
@@ -51,7 +52,7 @@ export default function RelayTile({
               />
               <div className="w-11 h-6 bg-slate-400/40 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
             </label>
-          )}
+          ) : null}
         </div>
       </div>
 

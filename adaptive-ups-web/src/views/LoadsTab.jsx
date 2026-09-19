@@ -101,7 +101,7 @@ export default function LoadsTab({
         <div className="flex flex-col gap-3">
           {/* RELAY 1: MAINS GRID CUTOFF RELAY */}
           <RelayTile
-            title="Relay 1: Mains Grid Cutoff Relay (GPIO 18)"
+            title="Relay 1: Master Relay"
             subtitle={
               supplyOn
                 ? 'Active: MAINS GRID ONLINE (230V AC Mains Supply Active)'
@@ -112,33 +112,34 @@ export default function LoadsTab({
             stateText={supplyOn ? 'MAINS ONLINE' : 'GRID ISOLATED'}
             stateColor={supplyOn ? '#10B981' : '#F59E0B'}
             value={supplyOn}
+            showToggle={false}
             isPending={pendingRelayId === 'source'}
             onChanged={(val) => onSetRelayState('source', val)}
             actions={
               <>
                 <button
-                  disabled={supplyOn}
-                  onClick={() => onSetRelayState('source', true)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border flex items-center gap-1 cursor-pointer transition ${
-                    supplyOn
-                      ? 'opacity-50 border-emerald-500/50 text-emerald-500'
-                      : 'border-[var(--border-color)] hover:bg-emerald-500/10 text-[var(--text-main)]'
-                  }`}
-                >
-                  <PlugZap className="w-3.5 h-3.5" />
-                  <span>Set Mains</span>
-                </button>
-                <button
                   disabled={!supplyOn}
                   onClick={() => onSetRelayState('source', false)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-bold border flex items-center gap-1 cursor-pointer transition ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border flex items-center gap-1.5 cursor-pointer transition shadow-sm ${
                     !supplyOn
-                      ? 'opacity-50 border-amber-500/50 text-amber-500'
-                      : 'border-[var(--border-color)] hover:bg-amber-500/10 text-[var(--text-main)]'
+                      ? 'bg-amber-500 border-amber-500 text-white shadow-amber-500/20'
+                      : 'bg-amber-500/10 border-amber-500/40 hover:bg-amber-500/25 text-amber-500'
                   }`}
                 >
                   <BatteryCharging className="w-3.5 h-3.5" />
                   <span>Set Inverter</span>
+                </button>
+                <button
+                  disabled={supplyOn}
+                  onClick={() => onSetRelayState('source', true)}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-extrabold border flex items-center gap-1.5 cursor-pointer transition shadow-sm ${
+                    supplyOn
+                      ? 'bg-emerald-500 border-emerald-500 text-white shadow-emerald-500/20'
+                      : 'bg-emerald-500/10 border-emerald-500/40 hover:bg-emerald-500/25 text-emerald-500'
+                  }`}
+                >
+                  <PlugZap className="w-3.5 h-3.5" />
+                  <span>Set Mains</span>
                 </button>
               </>
             }
@@ -146,7 +147,7 @@ export default function LoadsTab({
 
           {/* RELAY 2: INVERTER CUTOFF RELAY */}
           <RelayTile
-            title="Relay 2: Inverter Cutoff Relay (GPIO 5)"
+            title="Relay 2: Load 2 Green Light"
             subtitle="Inverter AC Backup Cutoff • Priority Supply Relay"
             icon={Lightbulb}
             iconColor={load1On ? '#38BDF8' : '#94A3B8'}
@@ -172,15 +173,15 @@ export default function LoadsTab({
 
           {/* RELAY 4: BATTERY-TO-INVERTER DC SUPPLY RELAY */}
           <RelayTile
-            title="Relay 4: Battery-to-Inverter DC Relay (GPIO 19)"
+            title="Relay - 4 Inverter Relay"
             subtitle="Controls whether Battery supplies DC voltage to Inverter"
             icon={Battery}
-            iconColor={battSupplyOn ? '#10B981' : '#EF4444'}
-            stateText={battSupplyOn ? 'DC SUPPLY ACTIVE (ON)' : 'DC SUPPLY CUTOFF (OFF)'}
-            stateColor={battSupplyOn ? '#10B981' : '#EF4444'}
-            value={battSupplyOn}
+            iconColor={!battSupplyOn ? '#10B981' : '#EF4444'}
+            stateText={!battSupplyOn ? 'DC SUPPLY (ON)' : 'DC SUPPLY (OFF)'}
+            stateColor={!battSupplyOn ? '#10B981' : '#EF4444'}
+            value={!battSupplyOn}
             isPending={pendingRelayId === 'battSupply'}
-            onChanged={(val) => onSetRelayState(4, val)}
+            onChanged={(val) => onSetRelayState(4, !val)}
           />
 
           {/* RELAY 5: BATTERY CHARGER CONTROL RELAY */}
